@@ -146,8 +146,9 @@ Defining the spatial autocorrelation structure will inform the weights associate
 #| fig-cap: "Empirical semivariogram."
 
 # empirical semivariogram
-v <- variogram(log_pm25 ~ 1, alpha = c(0, 45, 90, 135), data = smoke_sf)
-
+v <- variogram(log_pm25 ~ 1,data = smoke_sf)
+v0 <- variogram(log_pm25 ~ 1, alpha = c(0, 45, 90, 135), data = smoke_sf)
+plot(v)
 v |>
   ggplot(aes(x = dist, y = gamma)) +
   geom_point() +
@@ -169,6 +170,7 @@ v |>
   ) +
   ylim(c(0, NA))
 
+plot(v)
 
 ```
 
@@ -177,23 +179,25 @@ coords <- st_coordinates(smoke_sf)
 
 smoke_sf <- smoke_sf |>
   mutate(
-    x = coords[, 1], # long
-    y = coords[, 2]  # lat
+    x_coords = coords[, 1], # long
+    y_coords = coords[, 2]  # lat
   )
 
-
-v1 <- variogram(log_pm25 ~ x + y, alpha = c(0, 45, 90, 135), data = smoke_sf)
+v1 <- variogram(log_pm25 ~ x_coords + y_coords, data = smoke_sf)
 v1 |>
   ggplot(aes(x = dist, y = gamma)) +
   geom_point() +
-  scale_color_discrete(name = "Direction (°)", 
-                       labels = c("0°", "45°", "90°", "135°")) +
+  scale_color_discrete(name = "Direction (°)") +
   theme_bw() +
   labs(
     x = "Distance (km)", 
     y = expression(frac(1, 2) * (Z(bold(s)[i]) - Z(bold(s)[j]))^2)
   ) +
   ylim(c(0, NA))
+
+
+
+
 ```
 
 
@@ -203,35 +207,36 @@ Our goal with the semivariograms is to estimate the parameters of the theoretica
 #| label: fit-models
 
 # fitted variograms
-exp.vgm <- fit.variogram(v, vgm(
-                psill = 1.5,
+exp.vgm <- fit.variogram(v1, vgm(
+                psill = 1.25,
                 model = "Exp",
-                range = 400000, 
-                nugget = 0.05))
-sph.vgm <- fit.variogram(v, vgm(
-                psill = 1.5,
+                range = 400000/3, 
+                nugget = 0))
+sph.vgm <- fit.variogram(v1, vgm(
+                psill = 1.25,
                 model = "Sph",
                 range = 400000, 
-                nugget = 0.05))
-mat.vgm <- fit.variogram(v, vgm(
-                psill = 1.5,
+                nugget = 0))
+mat.vgm <- fit.variogram(v1, vgm(
+                psill = 1.25,
                 model = "Mat",
-                range = 400000, 
-                nugget = 0.05,
+                range = 400000/4.74, 
+                nugget = 0,
                 kappa = 3/2))
-gau.vgm <- fit.variogram(v, vgm(
-                psill = 1.5,
+gau.vgm <- fit.variogram(v1, vgm(
+                psill = 1.25,
                 model = "Gau",
-                range = 400000, 
-                nugget = 0.05))
+                range = 400000/sqrt(3), 
+                nugget = 0))
 
 # leave-one-out cross-validation with the fitted models
 cv_mse <- c(
-  exp = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = exp.vgm, verbose = FALSE)$residual^2), # 0.05339608
-  sph = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = sph.vgm, verbose = FALSE)$residual^2), # 0.05338668
-  mat = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = mat.vgm, verbose = FALSE)$residual^2), # 0.05545574
-  gau = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = gau.vgm, verbose = FALSE)$residual^2)  # 0.0836091
+  exp = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = exp.vgm, verbose = FALSE)$residual^2), # 0.05339602
+  sph = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = sph.vgm, verbose = FALSE)$residual^2), # 0.05339566
+  mat = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = mat.vgm, verbose = FALSE)$residual^2), # 0.05433780
+  gau = mean(krige.cv(log_pm25 ~ 1, smoke_sf, model = gau.vgm, verbose = FALSE)$residual^2)  # 0.08219946
 )
+cv_mse
 ```
 
 ::: {.callout}
@@ -248,17 +253,16 @@ cv_mse <- c(
 
 # plot
 bind_rows(
-variogramLine(exp.vgm, maxdist = max(v$dist)) %>% mutate(model = "exp"),
-variogramLine(sph.vgm, maxdist = max(v$dist)) %>% mutate(model = "sph"),
-variogramLine(mat.vgm, maxdist = max(v$dist)) %>% mutate(model = "mat"),
-variogramLine(gau.vgm, maxdist = max(v$dist)) %>% mutate(model = "gau")
+variogramLine(exp.vgm, maxdist = max(v1$dist)) %>% mutate(model = "exp"),
+variogramLine(sph.vgm, maxdist = max(v1$dist)) %>% mutate(model = "sph"),
+variogramLine(mat.vgm, maxdist = max(v1$dist)) %>% mutate(model = "mat"),
+variogramLine(gau.vgm, maxdist = max(v1$dist)) %>% mutate(model = "gau")
 ) %>%
 ggplot(aes(x = dist, y = gamma)) +
 geom_line(aes(col = model)) +
-geom_point(data = v) +
+geom_point(data = v1) +
 theme_bw()
 ```
-
 
 Once we have parameters for the nugget, the sill, and the range that we have gathered from the empirical semivariogram, we also must define a covariance function. For this report, we considered the Exponential, Spherical, Gaussian, and Matern (v = 3/2) covariance functions. We fit a kriging model for each of these covariance functions and perform Leave One Out Cross Validation (LOO-CV) to assess each model’s performance, selecting the model with the covariance function that produces the smallest Mean Squared Error (MSE). In LOO-CV, we “hide” one observed location’s $\text{PM}_{2.5}$ concentration value and use our kriging model to predict that hidden value, comparing our prediction to the actual value by finding the difference and squaring it. We repeat this for all observed locations in the data set and compute the mean of the squared residuals or errors. For our final model, we seek the covariance function that produces the lowest MSE. This kriging model with the specified covariance function, based on the parameters we inputted, will serve as our final model and what we use to ultimately make predictions across the surface.
 
@@ -325,12 +329,16 @@ smoke_sf <- smoke_sf |>
 pred_grid <- pred_grid |>
   mutate(
     distm = st_distance(x, smoke_sf) |> units::drop_units(),
-    dist = distm / maxd
+    dist = distm / maxd,
+    x_coords = st_coordinates(x)[,1],
+    y_coords = st_coordinates(x)[,2]
   )
 
 # fit kriging model
 preds <- krige(
-formula = log_pm25 ~ 1, smoke_sf, pred_grid,
+formula = log_pm25 ~ x_coords + y_coords, 
+locations = smoke_sf, 
+newdata = pred_grid,
 model = sph.vgm
 )
 
@@ -404,3 +412,4 @@ p2
 
 ```{r, ref.label = c("fig-krige"), eval=F, echo=T}
 ```
+
